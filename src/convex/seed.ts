@@ -1,10 +1,12 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { v } from "convex/values";
 import { mutation } from "./_generated/server";
 import { ROLES } from "./schema";
-import { daysFromNow, getSettings, mulberry32, pick, startOfDay } from "./lib";
+import { getSettings, mulberry32, pick, startOfDay, STAFF_ROLES } from "./lib";
 import type { Id } from "./_generated/dataModel";
 // (Id is used by member/trainer id arrays)
+
+/** Emails that always receive Super Admin access when they sign in. */
+const DEFAULT_OWNER_EMAILS = ["adarshsharma@gmail.com"];
 
 // ---------------------------------------------------------------------------
 // Demo dataset — realistic gym business data so every admin module has
@@ -185,35 +187,20 @@ const POSTS = [
 export const ensureSeeded = mutation({
   args: {},
   handler: async (ctx) => {
-    // Promote the very first signed-in user to Super Admin so the dashboard
-    // is usable immediately. Later sign-ups stay regular members.
+    // Promotion rule: the first account to sign in becomes Super Admin, and
+    // any account on the owner list always gets staff access.
     const actorId = await getAuthUserId(ctx);
-    if (actorId) {
-      const actor = await ctx.db.get(actorId);
-      const hasStaff = await ctx.db
-        .query("users")
-        .filter((q) =>
-          q.or(
-            q.eq(q.field("role"), ROLES.SUPER_ADMIN),
-            q.eq(q.field("role"), ROLES.ADMIN),
-            q.eq(q.field("role"), ROLES.STAFF),
-          ),
-        )
-        .first();
-      if (actor && !actor.role && !hasStaff) {
-        await ctx.db.patch(actorId, { role: ROLES.SUPER_ADMIN });
-      }
-    }
+    let settings = await getSettings(ctx);
 
-    const existing = await getSettings(ctx);
-    if (existing) return;
-
-    const rng = mulberry32(20260903);
-    const now = Date.now();
+    if (!settings) {
+      // ---- first run: seed the demo dataset -------------------------------
+      const rng = mulberry32(20260903);
+      const now = Date.now();
 
     // ---- Settings ----------------------------------------------------------
     await ctx.db.insert("settings", {
       seededAt: now,
+      ownerEmails: DEFAULT_OWNER_EMAILS,
       gym: {
         name: "Pulse Athletics",
         tagline: "Train hard. Recover smart.",
@@ -558,5 +545,68 @@ export const ensureSeeded = mutation({
     for (const item of dueItems.slice(0, 2)) {
       await ctx.db.patch(item._id, { lastMaintenance: now - 40 * 86_400_000, nextMaintenance: now - 10 * 86_400_000 });
     }
+
+      settings = await getSettings(ctx);
+    }
+
+    // Upgrade pre-seeded deployments with the owner list.
+    if (settings && (settings.ownerEmails ?? []).length === 0) {
+      await ctx.db.patch(settings._id, { ownerEmails: DEFAULT_OWNER_EMAILS });
+    }
+
+    // First account to sign in, or any account on the owner list, gets staff.
+    if (actorId) {
+      const actor = await ctx.db.get(actorId);
+      if (actor && !(actor.role && STAFF_ROLES.includes(actor.role))) {
+        const hasStaff = await ctx.db
+          .query("users")
+          .filter((q) =>
+            q.or(
+              q.eq(q.field("role"), ROLES.SUPER_ADMIN),
+              q.eq(q.field("role"), ROLES.ADMIN),
+              q.eq(q.field("role"), ROLES.STAFF),
+            ),
+          )
+          .first();
+        const ownerEmails = (settings?.ownerEmails ?? DEFAULT_OWNER_EMAILS).map((e) => e.toLowerCase());
+        const isOwner = ownerEmails.includes((actor.email ?? "").toLowerCase());
+        if (!hasStaff || isOwner) {
+          await ctx.db.patch(actorId, { role: ROLES.SUPER_ADMIN });
+        }
+      }
+    }
+  },
+});
+
+/** Grants the signed-in account staff access when it is on the owner list
+ *  (or when the workspace has no staff yet). Used from the blocked screen. */
+export const claimStaff = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const actorId = await getAuthUserId(ctx);
+    if (!actorId) throw new Error("You need to sign in first.");
+    const actor = await ctx.db.get(actorId);
+    if (!actor) throw new Error("Account not found.");
+    if (actor.role && STAFF_ROLES.includes(actor.role)) return "already-staff";
+
+    const settings = await getSettings(ctx);
+    const ownerEmails = (settings?.ownerEmails ?? DEFAULT_OWNER_EMAILS).map((e) => e.toLowerCase());
+    const hasStaff = await ctx.db
+      .query("users")
+      .filter((q) =>
+        q.or(
+          q.eq(q.field("role"), ROLES.SUPER_ADMIN),
+          q.eq(q.field("role"), ROLES.ADMIN),
+          q.eq(q.field("role"), ROLES.STAFF),
+        ),
+      )
+      .first();
+    if (!hasStaff || ownerEmails.includes((actor.email ?? "").toLowerCase())) {
+      await ctx.db.patch(actorId, { role: ROLES.SUPER_ADMIN });
+      return "granted";
+    }
+    throw new Error(
+      "This account isn't on the owner list. Ask the gym owner to add your email to the owner list in Settings → Roles & Staff.",
+    );
   },
 });

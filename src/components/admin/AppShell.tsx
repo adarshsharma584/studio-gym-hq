@@ -2,6 +2,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import {
@@ -132,7 +133,9 @@ export default function AppShell() {
   const location = useLocation();
   const settings = useQuery(api.settings.get);
   const ensureSeeded = useMutation(api.seed.ensureSeeded);
+  const claimStaff = useMutation(api.seed.claimStaff);
   const [seedAttempted, setSeedAttempted] = useState(false);
+  const [claiming, setClaiming] = useState(false);
 
   useEffect(() => {
     if (user && settings === null && !seedAttempted) {
@@ -167,6 +170,22 @@ export default function AppShell() {
   }
 
   if (!isStaff) {
+    const handleClaimStaff = async () => {
+      setClaiming(true);
+      try {
+        const result = await claimStaff();
+        if (result === "granted") {
+          toast.success("Staff access activated — welcome to the admin console");
+        } else {
+          toast.success("Your account already has staff access");
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Could not activate staff access");
+      } finally {
+        setClaiming(false);
+      }
+    };
+
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-6 text-center">
         <div className="flex size-12 items-center justify-center rounded-full bg-muted">
@@ -175,14 +194,21 @@ export default function AppShell() {
         <div>
           <h1 className="text-lg font-semibold">Staff access required</h1>
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-            The Pulse Athletics admin dashboard is for staff accounts. If you just signed up, your
-            account may not have been granted staff access yet.
+            The Pulse Athletics admin dashboard is for staff accounts. Signed in as{" "}
+            <span className="font-medium text-foreground">{user.email ?? "guest account"}</span>. If
+            you're the gym owner, activate your access below.
           </p>
         </div>
-        <Button variant="outline" className="cursor-pointer" onClick={handleSignOut}>
-          <LogOut className="mr-2 size-4" />
-          Sign out
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button className="cursor-pointer gap-2" onClick={handleClaimStaff} disabled={claiming}>
+            <ShieldCheck className="size-4" />
+            {claiming ? "Activating…" : "Activate staff access"}
+          </Button>
+          <Button variant="outline" className="cursor-pointer" onClick={handleSignOut}>
+            <LogOut className="mr-2 size-4" />
+            Sign out
+          </Button>
+        </div>
       </div>
     );
   }

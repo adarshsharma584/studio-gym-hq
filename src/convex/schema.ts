@@ -319,6 +319,8 @@ const schema = defineSchema(
     // -----------------------------------------------------------------------
     settings: defineTable({
       seededAt: v.optional(v.number()),
+      // Emails that always receive Super Admin access on sign-in
+      ownerEmails: v.optional(v.array(v.string())),
       gym: v.object({
         name: v.string(),
         tagline: v.string(),
