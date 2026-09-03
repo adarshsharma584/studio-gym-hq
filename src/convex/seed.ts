@@ -6,7 +6,7 @@ import type { Id } from "./_generated/dataModel";
 // (Id is used by member/trainer id arrays)
 
 /** Emails that always receive Super Admin access when they sign in. */
-const DEFAULT_OWNER_EMAILS = ["adarshsharma@gmail.com"];
+const DEFAULT_OWNER_EMAILS = ["adarshsharma@gmail.com", "adarshsharma0862@gmail.com"];
 
 // ---------------------------------------------------------------------------
 // Demo dataset — realistic gym business data so every admin module has
@@ -549,9 +549,14 @@ export const ensureSeeded = mutation({
       settings = await getSettings(ctx);
     }
 
-    // Upgrade pre-seeded deployments with the owner list.
-    if (settings && (settings.ownerEmails ?? []).length === 0) {
-      await ctx.db.patch(settings._id, { ownerEmails: DEFAULT_OWNER_EMAILS });
+    // Keep the stored owner list in sync with the code defaults — upgrades
+    // already-seeded deployments whenever this runs.
+    if (settings) {
+      const current = settings.ownerEmails ?? [];
+      const merged = [...new Set([...current, ...DEFAULT_OWNER_EMAILS])];
+      if (JSON.stringify(merged) !== JSON.stringify(current)) {
+        await ctx.db.patch(settings._id, { ownerEmails: merged });
+      }
     }
 
     // First account to sign in, or any account on the owner list, gets staff.
@@ -590,7 +595,9 @@ export const claimStaff = mutation({
     if (actor.role && STAFF_ROLES.includes(actor.role)) return "already-staff";
 
     const settings = await getSettings(ctx);
-    const ownerEmails = (settings?.ownerEmails ?? DEFAULT_OWNER_EMAILS).map((e) => e.toLowerCase());
+    // Stored list plus the code defaults, so new owner emails apply even to
+    // environments that were seeded earlier.
+    const ownerEmails = [...new Set([...(settings?.ownerEmails ?? []), ...DEFAULT_OWNER_EMAILS])].map((e) => e.toLowerCase());
     const hasStaff = await ctx.db
       .query("users")
       .filter((q) =>
