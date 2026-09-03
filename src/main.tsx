@@ -11,8 +11,19 @@ import "./index.css";
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
-const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const AppShell = lazy(() => import("./components/admin/AppShell.tsx"));
+const Overview = lazy(() => import("./pages/admin/Overview.tsx"));
+const Members = lazy(() => import("./pages/admin/Members.tsx"));
+const Trainers = lazy(() => import("./pages/admin/Trainers.tsx"));
+const Plans = lazy(() => import("./pages/admin/Plans.tsx"));
+const Services = lazy(() => import("./pages/admin/Services.tsx"));
+const Equipment = lazy(() => import("./pages/admin/Equipment.tsx"));
+const Inventory = lazy(() => import("./pages/admin/Inventory.tsx"));
+const Content = lazy(() => import("./pages/admin/Content.tsx"));
+const Financials = lazy(() => import("./pages/admin/Financials.tsx"));
+const Notifications = lazy(() => import("./pages/admin/Notifications.tsx"));
+const Settings = lazy(() => import("./pages/admin/Settings.tsx"));
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -127,10 +138,22 @@ createRoot(document.getElementById("root")!).render(
                 path="/dashboard"
                 element={
                   <RequireAuth>
-                    <Dashboard />
+                    <AppShell />
                   </RequireAuth>
                 }
-              />
+              >
+                <Route index element={<Overview />} />
+                <Route path="members" element={<Members />} />
+                <Route path="trainers" element={<Trainers />} />
+                <Route path="plans" element={<Plans />} />
+                <Route path="services" element={<Services />} />
+                <Route path="equipment" element={<Equipment />} />
+                <Route path="inventory" element={<Inventory />} />
+                <Route path="content" element={<Content />} />
+                <Route path="financials" element={<Financials />} />
+                <Route path="notifications" element={<Notifications />} />
+                <Route path="settings" element={<Settings />} />
+              </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>

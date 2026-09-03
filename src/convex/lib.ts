@@ -22,6 +22,14 @@ export async function requireRole(ctx: QueryCtx, allowed: Role[]) {
   return actor;
 }
 
+/** Fetch the singleton settings document, or null before it is seeded. */
+export async function getSettings(ctx: QueryCtx) {
+  return await ctx.db
+    .query("settings")
+    .filter((q) => q.neq(q.field("seededAt"), undefined))
+    .first();
+}
+
 export function startOfDay(ts: number) {
   const d = new Date(ts);
   d.setHours(0, 0, 0, 0);
