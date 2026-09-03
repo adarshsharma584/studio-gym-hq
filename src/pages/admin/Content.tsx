@@ -1,6 +1,6 @@
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,8 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader, StatusBadge, formatDate, formatDateTime, relativeDays } from "@/components/admin/ui";
-import { CalendarClock, Eye, Image as ImageIcon, Pencil, Plus, Trash2, Video } from "lucide-react";
+import { CalendarClock, Eye, Image as ImageIcon, Pencil, Play, Plus, Trash2, Video } from "lucide-react";
+import { MediaUpload, type MediaValue } from "@/components/admin/MediaUpload";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 
 type BannerRow = Doc<"banners"> & { isActive: boolean };
@@ -66,7 +67,7 @@ function BannerDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   initial: BannerRow | null;
-  onSave: (b: { title: string; ctaLabel?: string; ctaLink?: string; startDate: number; endDate: number; position: number; active: boolean }, id?: Id<"banners">) => Promise<void>;
+  onSave: (b: { title: string; image?: string; storageId?: Id<"_storage">; removeStorageId?: Id<"_storage">; ctaLabel?: string; ctaLink?: string; startDate: number; endDate: number; position: number; active: boolean }, id?: Id<"banners">) => Promise<void>;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [ctaLabel, setCtaLabel] = useState(initial?.ctaLabel ?? "");
@@ -76,6 +77,29 @@ function BannerDialog({
   const [position, setPosition] = useState(initial ? String(initial.position) : "0");
   const [active, setActive] = useState(initial?.active ?? true);
   const [saving, setSaving] = useState(false);
+  const [media, setMedia] = useState<MediaValue | null>(() =>
+    initial?.image ? { url: initial.image, storageId: initial.storageId } : null,
+  );
+  const discardUpload = useMutation(api.content.discardUpload);
+  const pendingStorage = useRef<Id<"_storage"> | null>(null);
+
+  /** Drop any file that was uploaded but never saved (dialog closed). */
+  const discardPending = () => {
+    if (pendingStorage.current) {
+      void discardUpload({ storageId: pendingStorage.current }).catch(() => {});
+      pendingStorage.current = null;
+    }
+  };
+
+  const handleOpenChange = (v: boolean) => {
+    if (!v) discardPending();
+    onOpenChange(v);
+  };
+
+  const handleMediaChange = (v: MediaValue | null) => {
+    if (v?.storageId) pendingStorage.current = v.storageId;
+    setMedia(v);
+  };
 
   const submit = async () => {
     const startTs = fromDateInput(start);
@@ -89,6 +113,9 @@ function BannerDialog({
       await onSave(
         {
           title: title.trim(),
+          image: media?.url,
+          storageId: media?.storageId,
+          removeStorageId: initial?.storageId,
           ctaLabel: ctaLabel.trim() || undefined,
           ctaLink: ctaLink.trim() || undefined,
           startDate: startTs,
@@ -98,6 +125,8 @@ function BannerDialog({
         },
         initial?._id,
       );
+      if (!media && pendingStorage.current) discardPending();
+      pendingStorage.current = null;
       onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save banner");
@@ -107,7 +136,7 @@ function BannerDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{initial ? "Edit banner" : "New banner"}</DialogTitle>
@@ -116,6 +145,13 @@ function BannerDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
+          <MediaUpload
+            label="Banner image"
+            accept="image/*"
+            hint="Wide, high-resolution image recommended (16:9). Shown as the hero background on the customer homepage."
+            value={media}
+            onChange={handleMediaChange}
+          />
           <div className="space-y-1.5">
             <Label htmlFor="b-title">Headline *</Label>
             <Input id="b-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Monsoon Challenge — 30% off" />
@@ -170,21 +206,64 @@ function ReelDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   initial: ReelRow | null;
-  onSave: (r: { title: string; durationSec?: number; visible: boolean; order: number }, id?: Id<"reels">) => Promise<void>;
+  onSave: (r: { title: string; videoUrl?: string; storageId?: Id<"_storage">; removeStorageId?: Id<"_storage">; cover?: string; coverStorageId?: Id<"_storage">; removeCoverStorageId?: Id<"_storage">; durationSec?: number; visible: boolean; order: number }, id?: Id<"reels">) => Promise<void>;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [duration, setDuration] = useState(initial?.durationSec ? String(initial.durationSec) : "");
   const [visible, setVisible] = useState(initial?.visible ?? true);
   const [saving, setSaving] = useState(false);
+  const [video, setVideo] = useState<MediaValue | null>(() =>
+    initial?.videoUrl ? { url: initial.videoUrl, storageId: initial.storageId } : null,
+  );
+  const [cover, setCover] = useState<MediaValue | null>(() =>
+    initial?.cover ? { url: initial.cover, storageId: initial.coverStorageId } : null,
+  );
+  const discardUpload = useMutation(api.content.discardUpload);
+  const pendingStorage = useRef<Set<Id<"_storage">>>(new Set());
+
+  /** Drop any files that were uploaded but never saved (dialog closed). */
+  const discardPending = () => {
+    for (const sid of pendingStorage.current) {
+      void discardUpload({ storageId: sid }).catch(() => {});
+    }
+    pendingStorage.current.clear();
+  };
+
+  const handleOpenChange = (v: boolean) => {
+    if (!v) discardPending();
+    onOpenChange(v);
+  };
+
+  const handleVideoChange = (v: MediaValue | null) => {
+    if (v?.storageId) pendingStorage.current.add(v.storageId);
+    setVideo(v);
+  };
+
+  const handleCoverChange = (v: MediaValue | null) => {
+    if (v?.storageId) pendingStorage.current.add(v.storageId);
+    setCover(v);
+  };
 
   const submit = async () => {
     if (!title.trim()) return;
     setSaving(true);
     try {
       await onSave(
-        { title: title.trim(), durationSec: duration ? Number(duration) : undefined, visible, order: initial?.order ?? 0 },
+        {
+          title: title.trim(),
+          videoUrl: video?.url,
+          storageId: video?.storageId,
+          removeStorageId: initial?.storageId,
+          cover: cover?.url,
+          coverStorageId: cover?.storageId,
+          removeCoverStorageId: initial?.coverStorageId,
+          durationSec: duration ? Number(duration) : undefined,
+          visible,
+          order: initial?.order ?? 0,
+        },
         initial?._id,
       );
+      pendingStorage.current.clear();
       onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save reel");
@@ -194,13 +273,27 @@ function ReelDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{initial ? "Edit reel" : "Add reel"}</DialogTitle>
           <DialogDescription>Short clips shown in the Instagram-style Reels strip on the customer app.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
+          <MediaUpload
+            label="Reel video"
+            accept="video/*"
+            hint="Short vertical clip (9:16 works best). Plays in the Reels strip on the customer site."
+            value={video}
+            onChange={handleVideoChange}
+          />
+          <MediaUpload
+            label="Cover image (optional)"
+            accept="image/*"
+            hint="Poster shown on the card before the video plays."
+            value={cover}
+            onChange={handleCoverChange}
+          />
           <div className="space-y-1.5">
             <Label htmlFor="r-title">Title *</Label>
             <Input id="r-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. 60-second legs day finisher" />
@@ -344,7 +437,7 @@ function PostDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   initial: PostRow | null;
-  onSave: (p: { title: string; type: string; excerpt?: string; body?: string; published: boolean }, id?: Id<"posts">) => Promise<void>;
+  onSave: (p: { title: string; type: string; image?: string; storageId?: Id<"_storage">; removeStorageId?: Id<"_storage">; excerpt?: string; body?: string; published: boolean }, id?: Id<"posts">) => Promise<void>;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [type, setType] = useState<string>(initial?.type ?? "blog");
@@ -352,6 +445,29 @@ function PostDialog({
   const [body, setBody] = useState(initial?.body ?? "");
   const [published, setPublished] = useState(initial?.published ?? true);
   const [saving, setSaving] = useState(false);
+  const [media, setMedia] = useState<MediaValue | null>(() =>
+    initial?.image ? { url: initial.image, storageId: initial.storageId } : null,
+  );
+  const discardUpload = useMutation(api.content.discardUpload);
+  const pendingStorage = useRef<Id<"_storage"> | null>(null);
+
+  /** Drop any file that was uploaded but never saved (dialog closed). */
+  const discardPending = () => {
+    if (pendingStorage.current) {
+      void discardUpload({ storageId: pendingStorage.current }).catch(() => {});
+      pendingStorage.current = null;
+    }
+  };
+
+  const handleOpenChange = (v: boolean) => {
+    if (!v) discardPending();
+    onOpenChange(v);
+  };
+
+  const handleMediaChange = (v: MediaValue | null) => {
+    if (v?.storageId) pendingStorage.current = v.storageId;
+    setMedia(v);
+  };
 
   const submit = async () => {
     if (!title.trim()) return;
@@ -361,12 +477,17 @@ function PostDialog({
         {
           title: title.trim(),
           type,
+          image: media?.url,
+          storageId: media?.storageId,
+          removeStorageId: initial?.storageId,
           excerpt: excerpt.trim() || undefined,
           body: body.trim() || undefined,
           published,
         },
         initial?._id,
       );
+      if (!media && pendingStorage.current) discardPending();
+      pendingStorage.current = null;
       onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save post");
@@ -376,13 +497,20 @@ function PostDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{initial ? "Edit post" : "New post"}</DialogTitle>
           <DialogDescription>Blog articles and gallery entries pushed to the customer site.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
+          <MediaUpload
+            label={type === "gallery" ? "Gallery image" : "Cover image"}
+            accept="image/*"
+            hint={type === "gallery" ? "Shown in the gallery grid on the customer homepage." : "Shown as the card cover on the blog page."}
+            value={media}
+            onChange={handleMediaChange}
+          />
           <div className="space-y-1.5">
             <Label htmlFor="po-title">Title *</Label>
             <Input id="po-title" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -514,11 +642,20 @@ export default function Content() {
                     {data.banners.map((b) => (
                       <TableRow key={b._id}>
                         <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <span className="text-sm font-medium">{b.title}</span>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <StatusBadge status={b.isActive ? "live" : b.endDate > now ? "scheduled" : "expired"} label={b.isActive ? "Live now" : b.endDate > now ? "Scheduled" : "Expired"} />
-                              {!b.active && <Badge variant="outline" className="text-muted-foreground">disabled</Badge>}
+                          <div className="flex items-center gap-3">
+                            {b.image ? (
+                              <img src={b.image} alt="" className="size-14 shrink-0 rounded-lg border border-border/60 object-cover" />
+                            ) : (
+                              <div className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                <ImageIcon className="size-5" />
+                              </div>
+                            )}
+                            <div className="flex flex-col gap-1">
+                              <span className="text-sm font-medium">{b.title}</span>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <StatusBadge status={b.isActive ? "live" : b.endDate > now ? "scheduled" : "expired"} label={b.isActive ? "Live now" : b.endDate > now ? "Scheduled" : "Expired"} />
+                                {!b.active && <Badge variant="outline" className="text-muted-foreground">disabled</Badge>}
+                              </div>
                             </div>
                           </div>
                         </TableCell>
@@ -569,9 +706,20 @@ export default function Content() {
                 <div className="divide-y">
                   {data.reels.map((r) => (
                     <div key={r._id} className="flex items-center gap-4 px-6 py-3.5">
-                      <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                        <Video className="size-4" />
-                      </div>
+                      {r.cover ? (
+                        <img src={r.cover} alt="" className="size-14 shrink-0 rounded-lg border border-border/60 object-cover" />
+                      ) : r.videoUrl ? (
+                        <div className="relative flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-zinc-950">
+                          <video src={r.videoUrl} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                          <span className="absolute flex size-5 items-center justify-center rounded-full bg-black/60">
+                            <Play className="size-3 text-white" />
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                          <Video className="size-5" />
+                        </div>
+                      )}
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{r.title}</p>
                         <p className="text-xs text-muted-foreground">
@@ -660,9 +808,13 @@ export default function Content() {
                       <TableRow key={p._id}>
                         <TableCell>
                           <div className="flex items-center gap-3">
-                            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                              {p.type === "gallery" ? <ImageIcon className="size-4" /> : <Eye className="size-4" />}
-                            </div>
+                            {p.image ? (
+                              <img src={p.image} alt="" className="size-14 shrink-0 rounded-lg border border-border/60 object-cover" />
+                            ) : (
+                              <div className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                {p.type === "gallery" ? <ImageIcon className="size-5" /> : <Eye className="size-5" />}
+                              </div>
+                            )}
                             <div className="min-w-0">
                               <p className="truncate text-sm font-medium">{p.title}</p>
                               {p.excerpt && <p className="max-w-md truncate text-xs text-muted-foreground">{p.excerpt}</p>}
@@ -744,7 +896,7 @@ export default function Content() {
           <AlertDialogFooter>
             <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
             <AlertDialogAction className="cursor-pointer bg-destructive text-white hover:bg-destructive/90" onClick={async () => {
-              await removeBanner({ id: deletingBanner!._id });
+              await removeBanner({ id: deletingBanner!._id, storageId: deletingBanner!.storageId });
               toast.success("Banner deleted");
               setDeletingBanner(null);
             }}>Delete</AlertDialogAction>
@@ -761,7 +913,7 @@ export default function Content() {
           <AlertDialogFooter>
             <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
             <AlertDialogAction className="cursor-pointer bg-destructive text-white hover:bg-destructive/90" onClick={async () => {
-              await removeReel({ id: deletingReel!._id });
+              await removeReel({ id: deletingReel!._id, storageId: deletingReel!.storageId, coverStorageId: deletingReel!.coverStorageId });
               toast.success("Reel deleted");
               setDeletingReel(null);
             }}>Delete</AlertDialogAction>
@@ -795,7 +947,7 @@ export default function Content() {
           <AlertDialogFooter>
             <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
             <AlertDialogAction className="cursor-pointer bg-destructive text-white hover:bg-destructive/90" onClick={async () => {
-              await removePost({ id: deletingPost!._id });
+              await removePost({ id: deletingPost!._id, storageId: deletingPost!.storageId });
               toast.success("Post deleted");
               setDeletingPost(null);
             }}>Delete</AlertDialogAction>

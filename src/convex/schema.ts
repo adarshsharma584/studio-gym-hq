@@ -238,6 +238,7 @@ const schema = defineSchema(
     banners: defineTable({
       title: v.string(),
       image: v.optional(v.string()),
+      storageId: v.optional(v.id("_storage")),
       ctaLabel: v.optional(v.string()),
       ctaLink: v.optional(v.string()),
       startDate: v.number(),
@@ -249,7 +250,9 @@ const schema = defineSchema(
     reels: defineTable({
       title: v.string(),
       videoUrl: v.optional(v.string()),
+      storageId: v.optional(v.id("_storage")),
       cover: v.optional(v.string()),
+      coverStorageId: v.optional(v.id("_storage")),
       durationSec: v.optional(v.number()),
       visible: v.boolean(),
       order: v.number(),
@@ -271,6 +274,7 @@ const schema = defineSchema(
       excerpt: v.optional(v.string()),
       body: v.optional(v.string()),
       image: v.optional(v.string()),
+      storageId: v.optional(v.id("_storage")),
       published: v.boolean(),
       publishedAt: v.optional(v.number()),
     }),

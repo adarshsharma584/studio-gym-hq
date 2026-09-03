@@ -1,6 +1,14 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { requireRole, STAFF_ROLES } from "./lib";
+import { MutationCtx, mutation, query } from "./_generated/server";
+import { getSettings, requireRole, STAFF_ROLES } from "./lib";
+import type { Id } from "./_generated/dataModel";
+
+/** Resolve a freshly uploaded file to its public URL, or fail loudly. */
+async function resolveOrThrow(ctx: MutationCtx, storageId: Id<"_storage">) {
+  const url = await ctx.storage.getUrl(storageId);
+  if (!url) throw new Error("Uploaded file could not be resolved — please try uploading again.");
+  return url;
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -38,6 +46,36 @@ export const getAll = query({
 });
 
 // ---------------------------------------------------------------------------
+// Media uploads (Convex file storage)
+// ---------------------------------------------------------------------------
+/** Step 1: get a short-lived upload URL. Staff only. */
+export const generateUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireRole(ctx, STAFF_ROLES);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+/** Step 2 (preview): turn a storage id into its public URL right after upload. */
+export const resolveUploadUrl = mutation({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, { storageId }) => {
+    await requireRole(ctx, STAFF_ROLES);
+    return await ctx.storage.getUrl(storageId);
+  },
+});
+
+/** Clean up a file that was uploaded but never saved (dialog cancelled). */
+export const discardUpload = mutation({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, { storageId }) => {
+    await requireRole(ctx, STAFF_ROLES);
+    await ctx.storage.delete(storageId);
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Banners
 // ---------------------------------------------------------------------------
 export const saveBanner = mutation({
@@ -45,6 +83,8 @@ export const saveBanner = mutation({
     id: v.optional(v.id("banners")),
     title: v.string(),
     image: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+    removeStorageId: v.optional(v.id("_storage")),
     ctaLabel: v.optional(v.string()),
     ctaLink: v.optional(v.string()),
     startDate: v.number(),
@@ -54,20 +94,26 @@ export const saveBanner = mutation({
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, STAFF_ROLES);
-    const { id, ...rest } = args;
+    const { id, storageId, removeStorageId, ...rest } = args;
     if (args.endDate <= args.startDate) throw new Error("End date must be after start date");
+    if (removeStorageId && removeStorageId !== storageId) {
+      await ctx.storage.delete(removeStorageId);
+    }
+    const image = storageId ? await resolveOrThrow(ctx, storageId) : rest.image;
+    const patch = { ...rest, image, storageId };
     if (id) {
-      await ctx.db.patch(id, rest);
+      await ctx.db.patch(id, patch);
       return id;
     }
-    return await ctx.db.insert("banners", rest);
+    return await ctx.db.insert("banners", patch);
   },
 });
 
 export const removeBanner = mutation({
-  args: { id: v.id("banners") },
+  args: { id: v.id("banners"), storageId: v.optional(v.id("_storage")) },
   handler: async (ctx, args) => {
     await requireRole(ctx, STAFF_ROLES);
+    if (args.storageId) await ctx.storage.delete(args.storageId);
     await ctx.db.delete(args.id);
   },
 });
@@ -80,27 +126,46 @@ export const saveReel = mutation({
     id: v.optional(v.id("reels")),
     title: v.string(),
     videoUrl: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+    removeStorageId: v.optional(v.id("_storage")),
     cover: v.optional(v.string()),
+    coverStorageId: v.optional(v.id("_storage")),
+    removeCoverStorageId: v.optional(v.id("_storage")),
     durationSec: v.optional(v.number()),
     visible: v.boolean(),
     order: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, STAFF_ROLES);
-    const { id, ...rest } = args;
+    const { id, storageId, removeStorageId, coverStorageId, removeCoverStorageId, ...rest } = args;
+    if (removeStorageId && removeStorageId !== storageId) {
+      await ctx.storage.delete(removeStorageId);
+    }
+    if (removeCoverStorageId && removeCoverStorageId !== coverStorageId) {
+      await ctx.storage.delete(removeCoverStorageId);
+    }
+    const videoUrl = storageId ? await resolveOrThrow(ctx, storageId) : rest.videoUrl;
+    const cover = coverStorageId ? await resolveOrThrow(ctx, coverStorageId) : rest.cover;
+    const patch = { ...rest, videoUrl, cover, storageId, coverStorageId, order: rest.order ?? 0 };
     if (id) {
-      await ctx.db.patch(id, { ...rest, order: rest.order ?? 0 });
+      await ctx.db.patch(id, patch);
       return id;
     }
     const count = (await ctx.db.query("reels").collect()).length;
-    return await ctx.db.insert("reels", { ...rest, order: rest.order ?? count });
+    return await ctx.db.insert("reels", { ...patch, order: rest.order ?? count });
   },
 });
 
 export const removeReel = mutation({
-  args: { id: v.id("reels") },
+  args: {
+    id: v.id("reels"),
+    storageId: v.optional(v.id("_storage")),
+    coverStorageId: v.optional(v.id("_storage")),
+  },
   handler: async (ctx, args) => {
     await requireRole(ctx, STAFF_ROLES);
+    if (args.storageId) await ctx.storage.delete(args.storageId);
+    if (args.coverStorageId) await ctx.storage.delete(args.coverStorageId);
     await ctx.db.delete(args.id);
   },
 });
@@ -160,14 +225,22 @@ export const savePost = mutation({
     excerpt: v.optional(v.string()),
     body: v.optional(v.string()),
     image: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+    removeStorageId: v.optional(v.id("_storage")),
     published: v.boolean(),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, STAFF_ROLES);
-    const { id, ...rest } = args;
+    const { id, storageId, removeStorageId, ...rest } = args;
+    if (removeStorageId && removeStorageId !== storageId) {
+      await ctx.storage.delete(removeStorageId);
+    }
+    const image = storageId ? await resolveOrThrow(ctx, storageId) : rest.image;
     const patch = {
       ...rest,
       type: rest.type as "blog",
+      image,
+      storageId,
       publishedAt: rest.published ? Date.now() : undefined,
     };
     if (id) {
@@ -179,9 +252,48 @@ export const savePost = mutation({
 });
 
 export const removePost = mutation({
-  args: { id: v.id("posts") },
+  args: { id: v.id("posts"), storageId: v.optional(v.id("_storage")) },
   handler: async (ctx, args) => {
     await requireRole(ctx, STAFF_ROLES);
+    if (args.storageId) await ctx.storage.delete(args.storageId);
     await ctx.db.delete(args.id);
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Public customer-site feed — no auth required. Only returns content that is
+// enabled and currently inside its schedule window, so the customer UI always
+// reflects exactly what admins publish.
+// ---------------------------------------------------------------------------
+export const getPublic = query({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const [banners, reels, announcements, posts, plans, services, trainers, settings] = await Promise.all([
+      ctx.db.query("banners").collect(),
+      ctx.db.query("reels").collect(),
+      ctx.db.query("announcements").collect(),
+      ctx.db.query("posts").collect(),
+      ctx.db.query("plans").collect(),
+      ctx.db.query("services").collect(),
+      ctx.db.query("trainers").collect(),
+      getSettings(ctx),
+    ]);
+    return {
+      gym: settings?.gym ?? null,
+      banners: banners
+        .filter((b) => b.active && b.startDate <= now && now <= b.endDate)
+        .sort((a, b) => a.position - b.position),
+      reels: reels.filter((r) => r.visible).sort((a, b) => a.order - b.order),
+      announcements: announcements
+        .filter((a) => a.active && a.startsAt <= now && (a.endsAt === undefined || now <= a.endsAt))
+        .sort((a, b) => b.startsAt - a.startsAt),
+      posts: posts
+        .filter((p) => p.published)
+        .sort((a, b) => (b.publishedAt ?? b._creationTime) - (a.publishedAt ?? a._creationTime)),
+      plans: plans.filter((p) => p.active).sort((a, b) => a.price - b.price),
+      services: services.filter((s) => s.active),
+      trainers: trainers.filter((t) => t.active),
+    };
   },
 });
