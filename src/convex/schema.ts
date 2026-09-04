@@ -319,6 +319,20 @@ const schema = defineSchema(
     }),
 
     // -----------------------------------------------------------------------
+    // TRIAL BOOKINGS (lead capture from the customer site)
+    // -----------------------------------------------------------------------
+    leads: defineTable({
+      name: v.string(),
+      phone: v.string(),
+      goal: v.string(),
+      coachName: v.optional(v.string()),
+      planName: v.optional(v.string()),
+      source: v.optional(v.string()),
+      status: v.union(v.literal("new"), v.literal("contacted"), v.literal("converted")),
+      notes: v.optional(v.string()),
+    }).index("by_status", ["status"]),
+
+    // -----------------------------------------------------------------------
     // SYSTEM SETTINGS (single doc with id "default")
     // -----------------------------------------------------------------------
     settings: defineTable({
