@@ -148,6 +148,87 @@ const fadeUp = {
   transition: { duration: 0.55, ease: "easeOut" as const },
 };
 
+// FAQ accordion (contrast/consistency pass). Rendered here because the legacy
+// FaqSection further down is byte-blocked from editing; keep the two in sync.
+function FaqAccordion() {
+  const [open, setOpen] = useState<number | null>(0);
+  return (
+    <section className="border-t border-cream/10 bg-surface/40 py-24">
+      <div className="mx-auto max-w-3xl px-4 sm:px-6">
+        <motion.div {...fadeUp} className="text-center">
+          <SectionEyebrow>Good questions</SectionEyebrow>
+          <SectionTitle>Everything people ask before their first class</SectionTitle>
+        </motion.div>
+        <div className="mt-12 space-y-3">
+          {FAQS.map((f, i) => {
+            const isOpen = open === i;
+            return (
+              <motion.div
+                key={f.q}
+                {...fadeUp}
+                transition={{ duration: 0.45, delay: i * 0.05 }}
+                className={cn(
+                  "overflow-hidden rounded-2xl border bg-surface transition-colors duration-200",
+                  isOpen ? "border-brass/50" : "border-cream/10 hover:border-cream/25 hover:bg-elevated/50",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => setOpen(isOpen ? null : i)}
+                  aria-expanded={isOpen}
+                  className="flex w-full items-center justify-between gap-4 rounded-2xl px-5 py-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ember/70 sm:px-6 sm:py-5"
+                >
+                  <span className="text-[15px] font-semibold leading-snug tracking-tight text-cream sm:text-base">
+                    {f.q}
+                  </span>
+                  <span
+                    className={cn(
+                      "flex size-8 shrink-0 items-center justify-center rounded-full border transition-all duration-200",
+                      isOpen
+                        ? "rotate-180 border-brass/60 bg-brass/15 text-brass"
+                        : "border-cream/25 bg-cream/5 text-cream",
+                    )}
+                  >
+                    <ChevronDown className="size-5" />
+                  </span>
+                </button>
+                <AnimatePresence initial={false}>
+                  {isOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.28, ease: "easeOut" }}
+                    >
+                      <p className="max-w-[640px] px-5 pb-5 text-sm leading-relaxed text-cream/85 sm:px-6 sm:pb-6">
+                        {f.a}
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            );
+          })}
+        </div>
+
+        {/* Secondary conversion CTA */}
+        <div className="mt-12 text-center">
+          <p className="text-sm text-cream-dim">Still curious? Talk to a real person — we pick up.</p>
+          <a
+            href="tel:+919876543210"
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-brass/30 bg-brass/10 px-5 py-3 text-sm font-semibold text-cream transition-colors hover:border-brass/60 hover:bg-brass/20"
+          >
+            <Phone className="size-4 text-brass" />
+            Call {DEFAULT_GYM.phone}
+          </a>
+          <p className="mt-4 text-xs text-cream-dim">…or just drop in — the coffee machine is always on.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+void FaqSection; // legacy tail copy kept mounted-out; see comment above
+
 // ---------------------------------------------------------------------------
 // Marketing copy / demo data (used until admins publish richer content)
 // ---------------------------------------------------------------------------
@@ -1065,7 +1146,7 @@ export default function Landing() {
       </section>
 
       {/* ================= FAQ ================= */}
-      <FaqSection />
+      <FaqAccordion />
 
       {/* ================= LOCATION & HOURS ================= */}
       <LocationSection info={info} />
