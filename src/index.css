@@ -42,6 +42,18 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* Customer-site palette — Pulse Athletics */
+@theme {
+  --color-base: #121011;
+  --color-surface: #1c1917;
+  --color-elevated: #26221f;
+  --color-brass: #c9973a;
+  --color-ember: #ff6b4a;
+  --color-teal: #3fa9a0;
+  --color-cream: #f5f1eb;
+  --color-cream-dim: #a39c92;
+}
+
 /* CHANGE VALUES FOR THEME */
 :root {
   --radius: 0.625rem;
